@@ -6,7 +6,7 @@ import { setLogLevel } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-
 // --- 상수 및 전역 변수 ---
 const COLLECTION_NAME = "linger_data"; // Firestore 컬렉션 이름
 const GPS_UPDATE_INTERVAL = 2000; // 2초마다 위치 기록
-const STATIONARY_THRESHOLD_M = 3.0; // **[수정]** 반경 3미터로 허용 오차 확대 (GPS 드리프트 대응)
+const STATIONARY_THRESHOLD_M = 5.0; // **[추가 수정]** 5미터로 허용 오차 확대 (더 안정적인 테스트를 위함)
 const TIME_14S = 14000; // 14초 (밀리초)
 const TIME_30S = 30000; // 30초 (밀리초)
 const DOT_SIZE_SMALL = 8;
@@ -18,7 +18,11 @@ let gpsWatcherId = null; // watchPosition의 ID
 let isWritingGps = false;
 
 let allTrackedPoints = {}; // 모든 사용자 ID의 최신 점 데이터 { userId: {lat, lng, x, y, time, status}, ... }
-let localHistory = []; // GPS 데이터를 기록하는 장치(휴대폰)의 로컬 위치 기록 (머무름 계산용)
+
+// [수정된 변수] 머무름 계산을 위한 로컬 상태 유지
+let lastGpsPoint = null; // 직전에 기록된 GPS 위치 및 시간
+let accumulatedTime = 0; // 누적된 머무름 시간 (초기화되지 않은 경우)
+
 let referenceLat = null; // 맵 좌표계의 기준 위도
 let referenceLng = null; // 맵 좌표계의 기준 경도
 
@@ -160,8 +164,9 @@ function toggleGpsTracking() {
       clearInterval(gpsWatcherId); // setInterval 중지
       gpsWatcherId = null;
     }
-    // [추가] 로컬 기록 초기화
-    localHistory = [];
+    // [수정] 로컬 기록 대신 누적 시간 초기화
+    accumulatedTime = 0; 
+    lastGpsPoint = null; 
     isWritingGps = false;
     toggleGpsBtn.html("GPS 추적 시작 (핸드폰 센서 사용)");
     statusP.html("상태: GPS 추적 중지됨.");
@@ -173,10 +178,6 @@ function toggleGpsTracking() {
       toggleGpsBtn.html("GPS 추적 중지");
       isWritingGps = true;
       statusP.html("상태: GPS 권한 요청 중...");
-      
-      // [수정] watchPosition 대신 getCurrentPosition과 setInterval 조합을 사용
-      // watchPosition은 OS 레벨에서 위치가 변경될 때마다 호출되므로, 
-      // GPS_UPDATE_INTERVAL(2초) 간격의 정확한 데이터 기록을 위해 setInterval을 사용합니다.
       
       // 초기 호출 및 2초마다 반복 설정
       navigator.geolocation.getCurrentPosition(handleGpsSuccess, handleGpsError, { enableHighAccuracy: true });
@@ -202,13 +203,10 @@ function handleGpsSuccess(position) {
     statusP.html("상태: GPS 기준점 설정 완료.");
   }
   
-  // 1. [로컬 기록 업데이트] 새로운 위치를 로컬 기록에 추가
-  localHistory.push({ lat: latitude, lng: longitude, timestamp: timestamp });
-
-  // 2. [머무름 시간 계산] 로컬 기록을 기반으로 머무름 시간 계산
-  const stationaryTime = calculateStationaryTime();
+  // 1. [머무름 시간 계산] 직전 위치와 비교하여 누적 시간 계산
+  const stationaryTime = calculateStationaryTime(latitude, longitude, timestamp);
   
-  // 3. 상태 코드 결정
+  // 2. 상태 코드 결정
   let status = 0; // 0: 파랑 (기본)
   if (stationaryTime >= TIME_30S) {
     status = 2; // 2: 큰 빨강
@@ -216,6 +214,9 @@ function handleGpsSuccess(position) {
     status = 1; // 1: 작은 빨강
   }
 
+  // 3. 현재 위치를 직전 위치로 업데이트
+  lastGpsPoint = { lat: latitude, lng: longitude, timestamp: timestamp };
+  
   // 4. Firestore에 데이터 쓰기 (자신의 위치와 계산된 상태를 기록)
   writeGpsData(latitude, longitude, stationaryTime, status);
 
@@ -288,43 +289,26 @@ function calculateDistance(lat1, lng1, lat2, lng2) {
   return R * c; // 미터
 }
 
-// [수정됨] 로컬 기록을 기반으로 머무름 시간 계산
-function calculateStationaryTime() {
-  if (localHistory.length === 0) return 0;
-  
-  const now = Date.now();
-  let stationaryStartTime = now;
-  let foundStationary = false;
-  
-  // 로컬 히스토리를 역순으로 확인
-  // 가장 최근 기록부터 1m 반경을 벗어난 지점까지 시간을 추적
-  const latestPoint = localHistory[localHistory.length - 1];
-  
-  for (let i = localHistory.length - 2; i >= 0; i--) {
-    const point = localHistory[i];
-    // 현재 (가장 최근) 위치와 과거 기록된 위치 간의 거리 계산
-    const distance = calculateDistance(latestPoint.lat, latestPoint.lng, point.lat, point.lng);
-    
-    if (distance <= STATIONARY_THRESHOLD_M) {
-      // 3m 반경 이내에 있음: 머무름 시간이 시작된 시점을 기록
-      stationaryStartTime = point.timestamp;
-      foundStationary = true;
-    } else {
-      // 3m 밖으로 이동: 이전의 머무름이 끊어졌으므로 중단
-      break; 
+// [수정] 직전 위치와 비교하여 누적 머무름 시간 계산
+function calculateStationaryTime(currentLat, currentLng, currentTimestamp) {
+    if (!lastGpsPoint) {
+        // 첫 번째 데이터 수신: 시간 0으로 시작
+        return 0;
     }
-  }
-  
-  // 불필요한 과거 기록 정리 (최근 1분 데이터만 남김)
-  const cleanUpTime = now - 60000;
-  localHistory = localHistory.filter(p => p.timestamp > cleanUpTime);
 
-  if (foundStationary) {
-    // 가장 오래된 안정된 시간부터 현재까지의 누적 시간
-    return now - stationaryStartTime; 
-  }
-  
-  return 0; // 움직임이 감지되어 초기화
+    // 직전 위치와의 거리 계산
+    const distance = calculateDistance(currentLat, currentLng, lastGpsPoint.lat, lastGpsPoint.lng);
+    const timeDelta = currentTimestamp - lastGpsPoint.timestamp; // 마지막 기록 이후 흐른 시간 (약 2000ms)
+
+    if (distance <= STATIONARY_THRESHOLD_M) {
+        // 5m 반경 이내에 있음: 머무름 시간 누적
+        accumulatedTime += timeDelta;
+        return accumulatedTime;
+    } else {
+        // 5m 밖으로 이동: 머무름 시간 초기화
+        accumulatedTime = 0;
+        return 0;
+    }
 }
 
 // GPS 좌표를 캔버스 좌표로 변환
