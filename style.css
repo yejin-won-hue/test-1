@@ -1,8 +1,36 @@
 html, body {
   margin: 0;
   padding: 0;
+  overflow: hidden; /* 스크롤바 제거 */
 }
 
 canvas {
   display: block;
+}
+
+#statusContainer {
+  position: absolute;
+  top: 10px;
+  left: 10px;
+  background: rgba(255, 255, 255, 0.9);
+  padding: 10px;
+  border-radius: 8px;
+  box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+  font-family: sans-serif;
+  z-index: 10;
+}
+
+#statusContainer button {
+    padding: 8px 15px;
+    background-color: #4f46e5;
+    color: white;
+    border: none;
+    border-radius: 4px;
+    cursor: pointer;
+    margin-bottom: 5px;
+    font-size: 14px;
+}
+
+#statusContainer button:hover {
+    background-color: #4338ca;
 }

@@ -1,18 +1,53 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="ko">
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>PLIS: 개인 맞춤형 머무름 인지 시스템</title>
 
-    <title>Arduino weather app</title>
+    <!-- Firebase SDK 로드 -->
+    <script type="module" src="https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js"></script>
+    <script type="module" src="https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js"></script>
+    <script type="module" src="https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js"></script>
 
     <link rel="stylesheet" type="text/css" href="style.css" />
-
+    
+    <!-- p5.js 라이브러리 로드 -->
     <script src="https://cdn.jsdelivr.net/npm/p5@1.11.11/lib/p5.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/p5.js/1.9.0/addons/p5.sound.min.js"></script>
+    
+    <!-- 필수 전역 변수 설정 (GitHub Pages용) -->
+    <script>
+      // NOTE: 이 설정은 GitHub Pages에서 Firebase를 작동시키는 필수 과정입니다.
+      // 사용자님의 실제 Firebase 프로젝트 설정 값으로 반드시 교체해야 합니다.
+      const actualFirebaseConfig = {
+        apiKey: "YOUR_ACTUAL_API_KEY", 
+        authDomain: "YOUR_ACTUAL_AUTH_DOMAIN",
+        projectId: "YOUR_ACTUAL_PROJECT_ID",
+        storageBucket: "YOUR_ACTUAL_STORAGE_BUCKET",
+        messagingSenderId: "YOUR_ACTUAL_MESSAGING_SENDER_ID",
+        appId: "YOUR_ACTUAL_APP_ID"
+      };
+
+      // Firestore 동기화에 사용될 변수들을 window 객체에 할당
+      window.firebaseConfig = actualFirebaseConfig;
+      window.__app_id = actualFirebaseConfig.projectId || 'default-plis-app';
+    </script>
   </head>
 
   <body>
-    <script src="sketch.js"></script>
+    <!-- 캔버스 위에 UI를 표시할 영역 -->
+    <div id="ui-overlay">
+      <h1 id="app-title">PLIS: 실시간 머무름 맵</h1>
+      <div id="status-container">
+        <p id="user-id-p">User ID: N/A</p>
+        <p id="status-p">상태: 연결 중...</p>
+        <p id="role-p">역할: N/A</p>
+      </div>
+      <button id="toggle-gps-btn">GPS 추적 시작 (핸드폰 센서 사용)</button>
+    </div>
+    
+    <!-- sketch.js 로드 -->
+    <script type="module" src="sketch.js"></script>
   </body>
 </html>
